@@ -212,6 +212,7 @@ class AITradingStrategy(IStrategy):
         dataframe["ema_21"] = ta.EMA(dataframe, timeperiod=21)
         dataframe["ema_50"] = ta.EMA(dataframe, timeperiod=50)
         dataframe["ema_200"] = ta.EMA(dataframe, timeperiod=200)
+        dataframe["ema_50_rising"] = dataframe["ema_50"] > dataframe["ema_50"].shift(1)
 
         # --- RSI (Relative Strength Index) ---
         dataframe["rsi"] = ta.RSI(dataframe, timeperiod=14)
@@ -221,12 +222,10 @@ class AITradingStrategy(IStrategy):
 
         # --- Volatility Expansion & Breakout ---
         dataframe["atr_sma_50"] = ta.SMA(dataframe["atr"], timeperiod=50)
-        dataframe["vol_expansion"] = dataframe["atr"] > (1.2 * dataframe["atr_sma_50"])
+        dataframe["vol_expansion"] = dataframe["atr"] > dataframe["atr_sma_50"]
 
-        dataframe["highest_high_20"] = dataframe["high"].rolling(window=20).max().shift(1)
-        dataframe["lowest_low_20"] = dataframe["low"].rolling(window=20).min().shift(1)
-        dataframe["breakout_up"] = dataframe["close"] > dataframe["highest_high_20"]
-        dataframe["breakout_down"] = dataframe["close"] < dataframe["lowest_low_20"]
+        dataframe["highest_high_10"] = dataframe["high"].rolling(window=10).max().shift(1)
+        dataframe["lowest_low_10"] = dataframe["low"].rolling(window=10).min().shift(1)
 
         # --- Dynamic RSI Percentiles ---
         dataframe["rsi_10"] = dataframe["rsi"].rolling(window=100).quantile(0.1)
@@ -240,10 +239,23 @@ class AITradingStrategy(IStrategy):
         dataframe["minus_di"] = ta.MINUS_DI(dataframe, timeperiod=14)
 
         # --- Volume SMA ---
-        dataframe["volume_sma_20"] = ta.SMA(dataframe["volume"], timeperiod=20)
+        dataframe["volume_sma_10"] = ta.SMA(dataframe["volume"], timeperiod=10)
+
+        # --- Breakout Quality (Phase 2) ---
+        dataframe["candle_body_strength"] = (dataframe["close"] - dataframe["open"]).abs() / (dataframe["high"] - dataframe["low"] + 1e-10)
+        dataframe["vol_confirm"] = dataframe["volume"] > dataframe["volume_sma_10"]
+        
+        dataframe["breakout_up"] = (dataframe["close"] > dataframe["highest_high_10"]) & (dataframe["candle_body_strength"] > 0.3) & (dataframe["vol_confirm"])
+        dataframe["breakout_down"] = (dataframe["close"] < dataframe["lowest_low_10"]) & (dataframe["candle_body_strength"] > 0.3) & (dataframe["vol_confirm"])
 
         # --- FreqAI: populate prediction column ---
         dataframe = self.freqai.start(dataframe, metadata, self)
+
+        # --- Dynamic Probability Percentiles (Phase 1) ---
+        if "&-target_prob_up" in dataframe.columns:
+            dataframe["prob_up_80"] = dataframe["&-target_prob_up"].rolling(window=1000).quantile(0.80)
+        if "&-target_prob_down" in dataframe.columns:
+            dataframe["prob_down_80"] = dataframe["&-target_prob_down"].rolling(window=1000).quantile(0.80)
 
         return dataframe
 
@@ -395,10 +407,15 @@ class AITradingStrategy(IStrategy):
 
         # --- FreqAI Calibrated Probabilities ---
         if "&-target_prob_up" in dataframe.columns:
+            # Extreme Filter: Fixed 0.7 + Top 20% relative to recent history
             long_cond.append(dataframe["&-target_prob_up"] >= self.entry_threshold.value)
+            if "prob_up_80" in dataframe.columns:
+                long_cond.append(dataframe["&-target_prob_up"] >= dataframe["prob_up_80"])
         
         if "&-target_prob_down" in dataframe.columns:
             short_cond.append(dataframe["&-target_prob_down"] >= self.short_entry_threshold.value)
+            if "prob_down_80" in dataframe.columns:
+                short_cond.append(dataframe["&-target_prob_down"] >= dataframe["prob_down_80"])
 
         # --- Regime Filter (Trending Market) ---
         long_cond.append(dataframe["adx"] > self.adx_threshold.value)
@@ -414,19 +431,25 @@ class AITradingStrategy(IStrategy):
             short_cond.append(dataframe["ema_50_4h"] < dataframe["ema_200_4h"])
         else:
             long_cond.append(dataframe["ema_50"] > dataframe["ema_200"])
+            long_cond.append(dataframe["ema_50_rising"] == True)
             short_cond.append(dataframe["ema_50"] < dataframe["ema_200"])
+            short_cond.append(dataframe["ema_50_rising"] == False)
 
         # --- Short-term Trend ---
         long_cond.append(dataframe["ema_9"] > dataframe["ema_21"])
         short_cond.append(dataframe["ema_9"] < dataframe["ema_21"])
 
-        # --- Volatility Expansion or Breakout ---
-        long_cond.append((dataframe["vol_expansion"] == True) | (dataframe["breakout_up"] == True))
-        short_cond.append((dataframe["vol_expansion"] == True) | (dataframe["breakout_down"] == True))
+        # --- Volatility Expansion AND Breakout (Phase 6) ---
+        # Require: high-conviction breakout AND expanding volatility
+        long_cond.append(dataframe["breakout_up"] == True)
+        long_cond.append(dataframe["vol_expansion"] == True)
 
-        # --- Dynamic Momentum Sweet Spot ---
-        long_cond.append((dataframe["rsi"] > dataframe["rsi_10"]) & (dataframe["rsi"] < dataframe["rsi_90"]))
-        short_cond.append((dataframe["rsi"] > dataframe["rsi_10"]) & (dataframe["rsi"] < dataframe["rsi_90"]))
+        short_cond.append(dataframe["breakout_down"] == True)
+        short_cond.append(dataframe["vol_expansion"] == True)
+
+        # --- Momentum Guard ---
+        long_cond.append(dataframe["rsi"] < 70)
+        short_cond.append(dataframe["rsi"] > 30)
 
         # --- Portfolio Correlation Guard (Phase 4) ---
         if "block_long_corr" in dataframe.columns:
@@ -540,16 +563,15 @@ class AITradingStrategy(IStrategy):
             (current_time - trade.open_date_utc).total_seconds() / 3600
         )
 
-        # Rule 1: Dead trade timeout — kill stagnant losing positions
-        # Only exit if BOTH: open > 48h AND currently losing money
-        # Positive trades stay open — they might still reach trailing activation
-        if trade_duration_hours > 48 and current_profit < 0:
+        # Rule 1: Early Failure Exit (Phase 5)
+        # Kill stagnant losing positions early if they haven't worked within 12 candles
+        if trade_duration_hours > 12 and current_profit < 0:
             logger.info(
-                f"⏰ DEAD TRADE EXIT | {pair} | "
+                f"⏰ EARLY FAILURE EXIT | {pair} | "
                 f"Duration: {trade_duration_hours:.1f}h | "
                 f"Profit: {current_profit:.2%} | Reason: stagnant loser"
             )
-            return "dead_trade_timeout"
+            return "early_failure_exit"
 
         # Rule 2: Breakeven protection
         # If we reached 1.2%+ profit (trailing should have activated) but
