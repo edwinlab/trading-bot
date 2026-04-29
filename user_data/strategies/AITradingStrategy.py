@@ -163,6 +163,15 @@ class AITradingStrategy(IStrategy):
     # =========================================================================
     # Indicator Computation
     # =========================================================================
+    @informative('1d')
+    def populate_indicators_1d(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        """
+        Phase 7: 1-day timeframe indicators for true macro regime filtering (No-Trade Zone).
+        """
+        dataframe["ema_50"] = ta.EMA(dataframe, timeperiod=50)
+        dataframe["ema_200"] = ta.EMA(dataframe, timeperiod=200)
+        return dataframe
+
     @informative('4h')
     def populate_indicators_4h(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
@@ -395,8 +404,12 @@ class AITradingStrategy(IStrategy):
         long_cond.append(dataframe["adx"] > self.adx_threshold.value)
         short_cond.append(dataframe["adx"] > self.adx_threshold.value)
 
-        # --- Macro Trend Filter (4H) ---
-        if "ema_50_4h" in dataframe.columns and "ema_200_4h" in dataframe.columns:
+        # --- Macro Regime Filter / No-Trade Zone (Phase 7) ---
+        if "ema_50_1d" in dataframe.columns and "ema_200_1d" in dataframe.columns:
+            # True Macro Guard: Only long in Crypto Summer, only short in Crypto Winter
+            long_cond.append(dataframe["ema_50_1d"] > dataframe["ema_200_1d"])
+            short_cond.append(dataframe["ema_50_1d"] < dataframe["ema_200_1d"])
+        elif "ema_50_4h" in dataframe.columns and "ema_200_4h" in dataframe.columns:
             long_cond.append(dataframe["ema_50_4h"] > dataframe["ema_200_4h"])
             short_cond.append(dataframe["ema_50_4h"] < dataframe["ema_200_4h"])
         else:
@@ -616,6 +629,33 @@ class AITradingStrategy(IStrategy):
         except Exception as e:
             logger.warning(f"Position sizing error: {e}. Falling back to proposed_stake={proposed_stake:.2f}")
             return proposed_stake
+
+    # =========================================================================
+    # Execution Realism (Phase 6)
+    # =========================================================================
+    def custom_entry_price(
+        self, pair: str, current_time: datetime, proposed_rate: float,
+        entry_tag: str | None, side: str, **kwargs
+    ) -> float:
+        """
+        Phase 6: Simulate 0.1% entry slippage.
+        """
+        if side == "long":
+            return proposed_rate * 1.001  # Buy 0.1% higher than expected
+        else:
+            return proposed_rate * 0.999  # Short 0.1% lower than expected
+
+    def custom_exit_price(
+        self, pair: str, trade: Trade, current_time: datetime,
+        proposed_rate: float, current_profit: float, exit_tag: str | None, **kwargs
+    ) -> float:
+        """
+        Phase 6: Simulate 0.1% exit slippage.
+        """
+        if trade.is_short:
+            return proposed_rate * 1.001  # Buy back 0.1% higher
+        else:
+            return proposed_rate * 0.999  # Sell 0.1% lower
 
     # =========================================================================
     # Custom Informational Messages

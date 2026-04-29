@@ -11,6 +11,7 @@ user_data/plot/
 
 # SQLite trade database
 *.sqlite
+*.sqlite-*
 tradesv3.sqlite
 tradesv3.dryrun.sqlite
 
