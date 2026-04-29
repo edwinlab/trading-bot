@@ -1,0 +1,37 @@
+# Environment & Secrets
+.env
+
+# Freqtrade runtime data
+user_data/data/
+user_data/models/
+user_data/logs/
+user_data/backtest_results/
+user_data/hyperopt_results/
+user_data/plot/
+
+# SQLite trade database
+*.sqlite
+tradesv3.sqlite
+tradesv3.dryrun.sqlite
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

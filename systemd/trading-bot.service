@@ -1,0 +1,47 @@
+[Unit]
+Description=AI Crypto Trading Bot (Freqtrade)
+Documentation=https://www.freqtrade.io
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=botuser
+Group=botuser
+
+# Working directory — adjust to your installation path
+WorkingDirectory=/opt/tradding-bot
+
+# Run the bot with our strategy and FreqAI model
+ExecStart=/opt/tradding-bot/venv/bin/freqtrade trade \
+    --strategy AITradingStrategy \
+    --config /opt/tradding-bot/user_data/config.json \
+    --freqaimodel XGBoostRegressor \
+    --logfile /opt/tradding-bot/user_data/logs/freqtrade.log
+
+# Restart policy — always restart on failure, wait 10s
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Environment
+EnvironmentFile=/opt/tradding-bot/.env
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/tradding-bot/user_data
+
+# Resource limits (suitable for 2-core VPS)
+MemoryMax=1G
+CPUQuota=80%
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=trading-bot
+
+[Install]
+WantedBy=multi-user.target

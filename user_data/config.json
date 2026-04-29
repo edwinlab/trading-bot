@@ -1,0 +1,168 @@
+{
+    "// ==========================================================================": "",
+    "// AI CRYPTO TRADING BOT — FREQTRADE CONFIGURATION": "",
+    "// ==========================================================================": "",
+    "// Pair: BTC/USDT | Exchange: Binance | Mode: Dry Run (Paper Trading)": "",
+    "// ==========================================================================  ": "",
+    "// --- Trading Mode ---": "",
+    "trading_mode": "futures",
+    "margin_mode": "isolated",
+    "dry_run": true,
+    "dry_run_wallet": 1000,
+    "cancel_open_orders_on_exit": false,
+    "// --- Stake & Position ---": "",
+    "stake_currency": "USDT",
+    "stake_amount": "unlimited",
+    "tradable_balance_ratio": 0.99,
+    "max_open_trades": 1,
+    "amend_last_stake_amount": false,
+    "// --- Timeframe ---": "",
+    "timeframe": "1h",
+    "// --- Exchange Pair Configuration ---": "",
+    "exchange": {
+        "name": "binance",
+        "key": "${EXCHANGE_KEY}",
+        "secret": "${EXCHANGE_SECRET}",
+        "ccxt_config": {
+            "options": {
+                "defaultType": "future"
+            },
+            "enableRateLimit": true
+        },
+        "ccxt_sync_config": {},
+        "ccxt_async_config": {
+            "enableRateLimit": true,
+            "rateLimit": 200
+        },
+        "pair_whitelist": [
+            "BTC/USDT:USDT"
+        ],
+        "pair_blacklist": [
+            "BNB/.*"
+        ]
+    },
+    "// --- Entry/Exit Order Types ---": "",
+    "order_types": {
+        "entry": "market",
+        "exit": "market",
+        "emergency_exit": "market",
+        "force_entry": "market",
+        "force_exit": "market",
+        "stoploss": "market",
+        "stoploss_on_exchange": true,
+        "stoploss_on_exchange_interval": 60,
+        "stoploss_on_exchange_limit_ratio": 0.99
+    },
+    "// --- Entry/Exit Pricing ---": "",
+    "entry_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "check_depth_of_market": {
+            "enabled": false,
+            "bids_to_ask_delta": 1
+        }
+    },
+    "exit_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1
+    },
+    "// --- Stop Loss & ROI (defined in strategy class, not here) ---": "",
+    "// --- FreqAI (XGBoost ML Model with Calibration) ---": "",
+    "freqai": {
+        "enabled": true,
+        "purge_old_models": true,
+        "train_period_days": 30,
+        "backtest_period_days": 7,
+        "identifier": "btc_xgboost_calibrated_v1",
+        "live_retrain_hours": 168,
+        "expiration_hours": 336,
+        "fit_live_predictions_candles": 0,
+        "continual_learning": false,
+        "feature_parameters": {
+            "include_timeframes": [
+                "1h"
+            ],
+            "include_corr_pairlist": [],
+            "label_period_candles": 3,
+            "include_shifted_candles": 2,
+            "DI_threshold": 0.9,
+            "weight_factor": 0.9,
+            "principal_component_analysis": false,
+            "use_SVM_to_remove_outliers": true,
+            "indicator_periods_candles": [
+                10,
+                20
+            ]
+        },
+        "data_split_parameters": {
+            "test_size": 0.15,
+            "random_state": 42
+        },
+        "model_training_parameters": {
+            "n_estimators": 500,
+            "learning_rate": 0.05,
+            "max_depth": 4,
+            "subsample": 0.8,
+            "colsample_bytree": 0.8
+        },
+        "freqaimodel": "CalibratedXGBoostRegressor"
+    },
+    "// --- Telegram ---": "",
+    "telegram": {
+        "enabled": true,
+        "token": "${TELEGRAM_TOKEN}",
+        "chat_id": "${TELEGRAM_CHAT_ID}",
+        "allow_custom_messages": true,
+        "notification_settings": {
+            "status": "on",
+            "warning": "on",
+            "startup": "on",
+            "entry": "on",
+            "exit": {
+                "roi": "on",
+                "emergency_exit": "on",
+                "force_exit": "on",
+                "exit_signal": "on",
+                "trailing_stop_loss": "on",
+                "stop_loss": "on",
+                "stoploss_on_exchange": "on"
+            },
+            "protection_trigger": "on",
+            "protection_trigger_global": "on",
+            "show_candle": "off"
+        }
+    },
+    "// --- API Server (FreqUI) ---": "",
+    "api_server": {
+        "enabled": true,
+        "listen_ip_address": "0.0.0.0",
+        "listen_port": 8080,
+        "verbosity": "error",
+        "enable_openapi": false,
+        "jwt_secret_key": "",
+        "CORS_origins": [],
+        "username": "freqtrader",
+        "password": ""
+    },
+    "// --- Bot Internals ---": "",
+    "internals": {
+        "process_throttle_secs": 5,
+        "heartbeat_interval": 60
+    },
+    "// --- Data ---": "",
+    "dataformat_ohlcv": "feather",
+    "dataformat_trades": "feather",
+    "// --- Logging ---": "",
+    "logfile": "user_data/logs/freqtrade.log",
+    "// --- Initial State ---": "",
+    "initial_state": "running",
+    "force_entry_enable": true,
+    "// --- Pairlist ---": "",
+    "pairlists": [
+        {
+            "method": "StaticPairList"
+        }
+    ]
+}

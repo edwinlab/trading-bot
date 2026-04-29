@@ -1,0 +1,11 @@
+# =============================================================================
+# AI Crypto Trading Bot — Extra Dependencies
+# =============================================================================
+# Freqtrade core + FreqAI are installed separately:
+#   pip install 'freqtrade[freqai]'
+#
+# These are additional utilities for our custom setup.
+# =============================================================================
+
+# Environment variable management
+python-dotenv>=1.0.0

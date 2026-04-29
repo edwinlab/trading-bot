@@ -1,0 +1,19 @@
+{
+  "strategy_name": "AITradingStrategy",
+  "params": {
+    "max_open_trades": {
+      "max_open_trades": 1
+    },
+    "buy": {
+      "adx_threshold": 25,
+      "entry_threshold": 0.015,
+      "rsi_lower": 40,
+      "rsi_upper": 65
+    },
+    "sell": {
+      "exit_threshold": -0.01
+    }
+  },
+  "ft_stratparam_v": 1,
+  "export_time": "2026-04-29T08:25:00+00:00"
+}
