@@ -86,8 +86,8 @@ class AITradingStrategy(IStrategy):
 
     # Trailing stop: the PRIMARY profit-taking mechanism
     trailing_stop = True
-    trailing_stop_positive = 0.008         # Trail by 0.8% once activated
-    trailing_stop_positive_offset = 0.012  # Activate trailing at 1.2% profit
+    trailing_stop_positive = 0.010         # Trail by 1.0% once activated (Phase 4)
+    trailing_stop_positive_offset = 0.015  # Activate trailing at 1.5% profit (Phase 4)
     trailing_only_offset_is_reached = True # Only trail after offset
 
     # =========================================================================
@@ -130,7 +130,7 @@ class AITradingStrategy(IStrategy):
     
     # Entry Short: Calibrated probability of 'Down' >= 70%
     short_entry_threshold = DecimalParameter(
-        0.50, 0.95, default=0.80, decimals=2, space="sell",
+        0.50, 0.95, default=0.83, decimals=2, space="sell",
         optimize=True, load=True,
     )
 
@@ -246,11 +246,17 @@ class AITradingStrategy(IStrategy):
 
         # --- Breakout Quality (Phase 2) ---
         dataframe["candle_body_strength"] = (dataframe["close"] - dataframe["open"]).abs() / (dataframe["high"] - dataframe["low"] + 1e-10)
-        dataframe["vol_confirm"] = dataframe["volume"] > dataframe["volume_sma_10"]
         
-        dataframe["breakout_up"] = (dataframe["close"] > dataframe["highest_high_10"]) & (dataframe["candle_body_strength"] > 0.3) & (dataframe["vol_confirm"])
-        dataframe["breakout_down"] = (dataframe["close"] < dataframe["lowest_low_10"]) & (dataframe["candle_body_strength"] > 0.3) & (dataframe["vol_confirm"])
-
+        dataframe["breakout_up"] = (
+            (dataframe["close"] > dataframe["highest_high_10"]) &
+            (dataframe["candle_body_strength"] > 0.3) &
+            (dataframe["volume"] > dataframe["volume_sma_10"] * 1.5)
+        )
+        dataframe["breakout_down"] = (
+            (dataframe["close"] < dataframe["lowest_low_10"]) &
+            (dataframe["candle_body_strength"] > 0.3) &
+            (dataframe["volume"] > dataframe["volume_sma_10"] * 1.5)
+        )
         # --- FreqAI: populate prediction column ---
         dataframe = self.freqai.start(dataframe, metadata, self)
 
@@ -434,8 +440,11 @@ class AITradingStrategy(IStrategy):
             long_cond.append(dataframe["ema_50_4h"] > dataframe["ema_200_4h"])
             short_cond.append(dataframe["ema_50_4h"] < dataframe["ema_200_4h"])
         else:
+            # Phase 2: Asymmetric Long Filter
             long_cond.append(dataframe["ema_50"] > dataframe["ema_200"])
             long_cond.append(dataframe["ema_50_rising"] == True)
+            long_cond.append(dataframe["ema_50_slope"] > 0.05) # Strict 0.05% slope for longs
+            long_cond.append(dataframe["close"] < dataframe["ema_50"] * 1.02) # Proximity: Don't buy >2% above EMA50
             
             short_cond.append(dataframe["ema_50"] < dataframe["ema_200"])
             short_cond.append(dataframe["ema_50_rising"] == False)
