@@ -130,7 +130,7 @@ class AITradingStrategy(IStrategy):
     
     # Entry Short: Calibrated probability of 'Down' >= 70%
     short_entry_threshold = DecimalParameter(
-        0.50, 0.90, default=0.70, decimals=2, space="sell",
+        0.50, 0.95, default=0.80, decimals=2, space="sell",
         optimize=True, load=True,
     )
 
@@ -213,6 +213,9 @@ class AITradingStrategy(IStrategy):
         dataframe["ema_50"] = ta.EMA(dataframe, timeperiod=50)
         dataframe["ema_200"] = ta.EMA(dataframe, timeperiod=200)
         dataframe["ema_50_rising"] = dataframe["ema_50"] > dataframe["ema_50"].shift(1)
+        
+        # --- Trend Slope (Phase 2) ---
+        dataframe["ema_50_slope"] = (dataframe["ema_50"] - dataframe["ema_50"].shift(5)) / dataframe["ema_50"].shift(5) * 100
 
         # --- RSI (Relative Strength Index) ---
         dataframe["rsi"] = ta.RSI(dataframe, timeperiod=14)
@@ -255,7 +258,7 @@ class AITradingStrategy(IStrategy):
         if "&-target_prob_up" in dataframe.columns:
             dataframe["prob_up_80"] = dataframe["&-target_prob_up"].rolling(window=1000).quantile(0.80)
         if "&-target_prob_down" in dataframe.columns:
-            dataframe["prob_down_80"] = dataframe["&-target_prob_down"].rolling(window=1000).quantile(0.80)
+            dataframe["prob_down_90"] = dataframe["&-target_prob_down"].rolling(window=1000).quantile(0.90)
 
         return dataframe
 
@@ -407,31 +410,33 @@ class AITradingStrategy(IStrategy):
 
         # --- FreqAI Calibrated Probabilities ---
         if "&-target_prob_up" in dataframe.columns:
-            # Extreme Filter: Fixed 0.7 + Top 20% relative to recent history
+            # Phase 5: Fixed 0.70 + Top 20% relative to recent history
             long_cond.append(dataframe["&-target_prob_up"] >= self.entry_threshold.value)
             if "prob_up_80" in dataframe.columns:
                 long_cond.append(dataframe["&-target_prob_up"] >= dataframe["prob_up_80"])
         
         if "&-target_prob_down" in dataframe.columns:
             short_cond.append(dataframe["&-target_prob_down"] >= self.short_entry_threshold.value)
-            if "prob_down_80" in dataframe.columns:
-                short_cond.append(dataframe["&-target_prob_down"] >= dataframe["prob_down_80"])
+            if "prob_down_90" in dataframe.columns:
+                short_cond.append(dataframe["&-target_prob_down"] >= dataframe["prob_down_90"])
 
         # --- Regime Filter (Trending Market) ---
-        long_cond.append(dataframe["adx"] > self.adx_threshold.value)
-        short_cond.append(dataframe["adx"] > self.adx_threshold.value)
+        # Phase 2: Enforce strict ADX
+        long_cond.append(dataframe["adx"] > 25)
+        short_cond.append(dataframe["adx"] > 25)
 
         # --- Macro Regime Filter / No-Trade Zone (Phase 7) ---
         if "ema_50_1d" in dataframe.columns and "ema_200_1d" in dataframe.columns:
-            # True Macro Guard: Only long in Crypto Summer, only short in Crypto Winter
+            # Macro Guard: Long only in Crypto Summer. 
+            # Phase 4: Allow shorts during local pullbacks regardless of Macro.
             long_cond.append(dataframe["ema_50_1d"] > dataframe["ema_200_1d"])
-            short_cond.append(dataframe["ema_50_1d"] < dataframe["ema_200_1d"])
         elif "ema_50_4h" in dataframe.columns and "ema_200_4h" in dataframe.columns:
             long_cond.append(dataframe["ema_50_4h"] > dataframe["ema_200_4h"])
             short_cond.append(dataframe["ema_50_4h"] < dataframe["ema_200_4h"])
         else:
             long_cond.append(dataframe["ema_50"] > dataframe["ema_200"])
             long_cond.append(dataframe["ema_50_rising"] == True)
+            
             short_cond.append(dataframe["ema_50"] < dataframe["ema_200"])
             short_cond.append(dataframe["ema_50_rising"] == False)
 
