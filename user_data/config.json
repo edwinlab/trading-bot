@@ -17,7 +17,7 @@
     "max_open_trades": 1,
     "amend_last_stake_amount": false,
     "// --- Timeframe ---": "",
-    "timeframe": "1h",
+    "timeframe": "15m",
     "// --- Exchange Pair Configuration ---": "",
     "exchange": {
         "name": "binance",
@@ -73,8 +73,8 @@
     "freqai": {
         "enabled": true,
         "purge_old_models": true,
-        "train_period_days": 30,
-        "backtest_period_days": 7,
+        "train_period_days": 15,
+        "backtest_period_days": 3,
         "identifier": "btc_xgboost_calibrated_v1",
         "live_retrain_hours": 168,
         "expiration_hours": 336,
@@ -82,7 +82,7 @@
         "continual_learning": false,
         "feature_parameters": {
             "include_timeframes": [
-                "1h"
+                "15m"
             ],
             "include_corr_pairlist": [],
             "label_period_candles": 3,

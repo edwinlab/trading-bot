@@ -53,7 +53,7 @@ class AITradingStrategy(IStrategy):
     # =========================================================================
     INTERFACE_VERSION = 3
 
-    timeframe = "1h"
+    timeframe = "15m"
 
     # Candles needed before indicators converge (longest EMA = 200)
     startup_candle_count: int = 200
@@ -76,7 +76,7 @@ class AITradingStrategy(IStrategy):
     # =========================================================================
     # OLD: stoploss = -0.01 (too tight, 38% of trades hit SL)
     # NEW: -3% gives BTC room to breathe on 1h timeframe
-    stoploss = -0.03
+    stoploss = -0.015
 
     # OLD: ROI capped winners at 0.5-2% → destroyed R:R
     # NEW: Safety-valve only — let trailing stop handle real exits
@@ -86,8 +86,8 @@ class AITradingStrategy(IStrategy):
 
     # Trailing stop: the PRIMARY profit-taking mechanism
     trailing_stop = True
-    trailing_stop_positive = 0.010         # Trail by 1.0% once activated (Phase 4)
-    trailing_stop_positive_offset = 0.015  # Activate trailing at 1.5% profit (Phase 4)
+    trailing_stop_positive = 0.003         # Trail by 0.3% once activated
+    trailing_stop_positive_offset = 0.006  # Activate trailing at 0.6% profit
     trailing_only_offset_is_reached = True # Only trail after offset
 
     # =========================================================================
@@ -130,7 +130,7 @@ class AITradingStrategy(IStrategy):
     
     # Entry Short: Calibrated probability of 'Down' >= 70%
     short_entry_threshold = DecimalParameter(
-        0.50, 0.95, default=0.83, decimals=2, space="sell",
+        0.50, 0.95, default=0.70, decimals=2, space="sell",
         optimize=True, load=True,
     )
 
@@ -227,8 +227,8 @@ class AITradingStrategy(IStrategy):
         dataframe["atr_sma_50"] = ta.SMA(dataframe["atr"], timeperiod=50)
         dataframe["vol_expansion"] = dataframe["atr"] > dataframe["atr_sma_50"]
 
-        dataframe["highest_high_10"] = dataframe["high"].rolling(window=10).max().shift(1)
-        dataframe["lowest_low_10"] = dataframe["low"].rolling(window=10).min().shift(1)
+        dataframe["highest_high_5"] = dataframe["high"].rolling(window=5).max().shift(1)
+        dataframe["lowest_low_5"] = dataframe["low"].rolling(window=5).min().shift(1)
 
         # --- Dynamic RSI Percentiles ---
         dataframe["rsi_10"] = dataframe["rsi"].rolling(window=100).quantile(0.1)
@@ -248,14 +248,14 @@ class AITradingStrategy(IStrategy):
         dataframe["candle_body_strength"] = (dataframe["close"] - dataframe["open"]).abs() / (dataframe["high"] - dataframe["low"] + 1e-10)
         
         dataframe["breakout_up"] = (
-            (dataframe["close"] > dataframe["highest_high_10"]) &
+            (dataframe["close"] > dataframe["highest_high_5"]) &
             (dataframe["candle_body_strength"] > 0.3) &
-            (dataframe["volume"] > dataframe["volume_sma_10"] * 1.5)
+            (dataframe["volume"] > dataframe["volume_sma_10"] * 1.1)
         )
         dataframe["breakout_down"] = (
-            (dataframe["close"] < dataframe["lowest_low_10"]) &
+            (dataframe["close"] < dataframe["lowest_low_5"]) &
             (dataframe["candle_body_strength"] > 0.3) &
-            (dataframe["volume"] > dataframe["volume_sma_10"] * 1.5)
+            (dataframe["volume"] > dataframe["volume_sma_10"] * 1.1)
         )
         # --- FreqAI: populate prediction column ---
         dataframe = self.freqai.start(dataframe, metadata, self)
@@ -264,6 +264,7 @@ class AITradingStrategy(IStrategy):
         if "&-target_prob_up" in dataframe.columns:
             dataframe["prob_up_80"] = dataframe["&-target_prob_up"].rolling(window=1000).quantile(0.80)
         if "&-target_prob_down" in dataframe.columns:
+            dataframe["prob_down_80"] = dataframe["&-target_prob_down"].rolling(window=1000).quantile(0.80)
             dataframe["prob_down_90"] = dataframe["&-target_prob_down"].rolling(window=1000).quantile(0.90)
 
         return dataframe
@@ -423,13 +424,14 @@ class AITradingStrategy(IStrategy):
         
         if "&-target_prob_down" in dataframe.columns:
             short_cond.append(dataframe["&-target_prob_down"] >= self.short_entry_threshold.value)
-            if "prob_down_90" in dataframe.columns:
-                short_cond.append(dataframe["&-target_prob_down"] >= dataframe["prob_down_90"])
+            # Relaxed percentile filter for short entries (top 20% instead of top 10%)
+            if "prob_down_80" in dataframe.columns:
+                short_cond.append(dataframe["&-target_prob_down"] >= dataframe["prob_down_80"])
 
         # --- Regime Filter (Trending Market) ---
-        # Phase 2: Enforce strict ADX
+        # Phase 2: Enforce strict ADX (relaxed to >15 for shorts to capture sudden breakdowns)
         long_cond.append(dataframe["adx"] > 25)
-        short_cond.append(dataframe["adx"] > 25)
+        short_cond.append(dataframe["adx"] > 15)
 
         # --- Macro Regime Filter / No-Trade Zone (Phase 7) ---
         if "ema_50_1d" in dataframe.columns and "ema_200_1d" in dataframe.columns:
@@ -458,8 +460,8 @@ class AITradingStrategy(IStrategy):
         long_cond.append(dataframe["breakout_up"] == True)
         long_cond.append(dataframe["vol_expansion"] == True)
 
+        # Relaxed for shorts: entry on breakdown candle immediately, don't wait for ATR to catch up
         short_cond.append(dataframe["breakout_down"] == True)
-        short_cond.append(dataframe["vol_expansion"] == True)
 
         # --- Momentum Guard ---
         long_cond.append(dataframe["rsi"] < 70)
@@ -478,8 +480,10 @@ class AITradingStrategy(IStrategy):
             long_cond.append(dataframe["DI_values"] < 0.9)
             short_cond.append(dataframe["DI_values"] < 0.9)
 
-        if long_cond:
-            dataframe.loc[reduce(lambda a, b: a & b, long_cond), "enter_long"] = 1
+        # Long entry disabled for Short-Only strategy
+        # if long_cond:
+        #     dataframe.loc[reduce(lambda a, b: a & b, long_cond), "enter_long"] = 1
+        dataframe.loc[:, "enter_long"] = 0
             
         if short_cond:
             dataframe.loc[reduce(lambda a, b: a & b, short_cond), "enter_short"] = 1
@@ -578,7 +582,7 @@ class AITradingStrategy(IStrategy):
         )
 
         # Rule 1: Early Failure Exit (Phase 5)
-        # Kill stagnant losing positions early if they haven't worked within 12 candles
+        # Kill stagnant losing positions early if they haven't worked within 12 hours (48 candles on 15m)
         if trade_duration_hours > 12 and current_profit < 0:
             logger.info(
                 f"⏰ EARLY FAILURE EXIT | {pair} | "
@@ -590,8 +594,10 @@ class AITradingStrategy(IStrategy):
         # Rule 2: Breakeven protection
         # If we reached 1.2%+ profit (trailing should have activated) but
         # profit fell back to negative, something went wrong — cut the loss
-        if trade.max_rate > 0:
-            max_profit_reached = (trade.max_rate - trade.open_rate) / trade.open_rate
+        # Note: handles short and long positions correctly using trade.min_rate / trade.max_rate
+        max_rate = trade.min_rate if trade.is_short else trade.max_rate
+        if max_rate > 0:
+            max_profit_reached = trade.calc_profit_ratio(max_rate)
             if max_profit_reached >= 0.012 and current_profit < 0:
                 logger.info(
                     f"🛡️ BREAKEVEN EXIT | {pair} | "
